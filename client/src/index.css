@@ -1,0 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600;700;800&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: 'Playfair Display', serif;
+  --font-space: 'Space Grotesk', sans-serif;
+  --color-sage: #9DC08B;
+  --color-sage-light: #EDF1E4;
+  --color-cream: #FDFBF7;
+}
+
+body {
+  font-family: var(--font-sans);
+}
