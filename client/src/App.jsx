@@ -1,13 +1,23 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
-import DashboardLayout from './pages/DashboardLayout';
-import DashboardHome from './pages/DashboardHome';
-import DonorEmailOrganizer from './pages/DonorEmailOrganizer';
-import VolunteerMatcher from './pages/VolunteerMatcher';
-import GrantAssistant from './pages/GrantAssistant';
-import EventSchedulerAI from './pages/EventSchedulerAI';
-import ImpactReporter from './pages/ImpactReporter';
+import DashboardLayout from './pages/ngo/DashboardLayout';
+import DashboardHome from './pages/ngo/DashboardHome';
+import DonorEmailOrganizer from './pages/ngo/DonorEmailOrganizer';
+import VolunteerMatcher from './pages/ngo/VolunteerMatcher';
+import PostTask from './pages/ngo/PostTask';
+import EventSchedulerAI from './pages/ngo/EventSchedulerAI';
+import ScanDocument from './pages/ngo/ScanDocument';
+import LiveHeatmap from './pages/ngo/LiveHeatmap';
+import ManageTasks from './pages/ngo/ManageTasks';
+
 import AuthPage from './pages/AuthPage';
+import ProtectedRoute from './auth/ProtectedRoute';
+import RoleProtectedRoute from './auth/RoleProtectedRoute';
+import VolunteerHome from './pages/volunteer/VolunteerHome';
+import VolunteerProfile from './pages/volunteer/VolunteerProfile';
+import FindTasks from './pages/volunteer/FindTasks';
+import VolunteerEvents from './pages/volunteer/VolunteerEvents';
+import ViewTask from './pages/volunteer/ViewTask';
 
 function App() {
   return (
@@ -15,14 +25,83 @@ function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/auth" element={<AuthPage />} />
-        <Route path="/dashboard" element={<DashboardLayout />}>
+
+        {/* 
+          Layer 1 — ProtectedRoute: any logged-in user can enter the dashboard shell.
+          Layer 2 — RoleProtectedRoute: each tool then enforces its own role requirement.
+          This avoids the infinite-redirect loop that happens when volunteers are
+          bounced back to /dashboard but /dashboard itself rejects them.
+        */}
+        <Route path="/dashboard" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+
           <Route index element={<DashboardHome />} />
-          <Route path="email-organizer" element={<DonorEmailOrganizer />} />
-          <Route path="volunteer-matcher" element={<VolunteerMatcher />} />
-          <Route path="event-scheduler" element={<EventSchedulerAI />} />
-          <Route path="grant-assistant" element={<GrantAssistant />} />
-          <Route path="impact-report" element={<ImpactReporter />} />
+
+          {/* ── NGO-only tools ── */}
+          <Route path="manage-tasks" element={
+            <RoleProtectedRoute allowedRoles={['ngo']}>
+              <ManageTasks />
+            </RoleProtectedRoute>
+          } />
+          <Route path="post-task" element={
+            <RoleProtectedRoute allowedRoles={['ngo']}>
+              <PostTask />
+            </RoleProtectedRoute>
+          } />
+          <Route path="email-organizer" element={
+            <RoleProtectedRoute allowedRoles={['ngo']}>
+              <DonorEmailOrganizer />
+            </RoleProtectedRoute>
+          } />
+          <Route path="volunteer-matcher" element={
+            <RoleProtectedRoute allowedRoles={['ngo']}>
+              <VolunteerMatcher />
+            </RoleProtectedRoute>
+          } />
+          <Route path="event-scheduler" element={
+            <RoleProtectedRoute allowedRoles={['ngo']}>
+              <EventSchedulerAI />
+            </RoleProtectedRoute>
+          } />
+          <Route path="scan-document" element={
+            <RoleProtectedRoute allowedRoles={['ngo']}>
+              <ScanDocument />
+            </RoleProtectedRoute>
+          } />
+          <Route path="live-map" element={
+            <RoleProtectedRoute allowedRoles={['ngo']}>
+              <LiveHeatmap />
+            </RoleProtectedRoute>
+          } />
+
         </Route>
+
+        {/* Volunteer routes */}
+        <Route path="/volunteer" element={
+          <RoleProtectedRoute allowedRoles={['volunteer']}>
+            <VolunteerHome />
+          </RoleProtectedRoute>
+        } />
+        <Route path="/volunteer/find-tasks" element={
+          <RoleProtectedRoute allowedRoles={['volunteer']}>
+            <FindTasks />
+          </RoleProtectedRoute>
+        } />
+        <Route path="/volunteer/task/:taskId" element={
+          <RoleProtectedRoute allowedRoles={['volunteer']}>
+            <ViewTask />
+          </RoleProtectedRoute>
+        } />
+        <Route path="/volunteer/events" element={
+          <RoleProtectedRoute allowedRoles={['volunteer']}>
+            <VolunteerEvents />
+          </RoleProtectedRoute>
+        } />
+        <Route path="/volunteer/profile" element={
+          <RoleProtectedRoute allowedRoles={['volunteer']}>
+            <VolunteerProfile />
+          </RoleProtectedRoute>
+        } />
+
       </Routes>
     </BrowserRouter>
   );

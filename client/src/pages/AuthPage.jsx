@@ -1,92 +1,177 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  Building2, 
-  User, 
-  ArrowLeft, 
-  Upload, 
-  Check, 
-  ChevronRight, 
-  Mail, 
-  Lock, 
-  Phone, 
-  Globe, 
-  MapPin, 
-  ShieldCheck, 
-  Heart,
-  Calendar,
-  Layers
+import {
+  Building2,
+  User,
+  ArrowLeft,
+  ChevronRight,
+  Mail,
+  Lock,
+  MapPin,
+
 } from 'lucide-react';
 import { gsap } from 'gsap';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { landingPage } from "../constants/index.js";
+import { auth, db } from '../firebase/firebase.js';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { useAuth } from '../auth/AuthContext.jsx';
+
+const AVATAR_LIST = [1, 2, 3, 4];
 
 const AuthPage = () => {
+  const { currentUser, userData } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (currentUser && userData) {
+      if (userData.role === 'ngo') navigate('/dashboard');
+      else if (userData.role === 'volunteer') navigate('/volunteer');
+    }
+  }, [currentUser, userData, navigate]);
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [adminFullName, setAdminFullName] = useState('');
+
+  const [city, setCity] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [location, setLocation] = useState('');
+  const [selectedSkills, setSelectedSkills] = useState([]);
+
   const [userType, setUserType] = useState(null); // null, 'ngo', 'volunteer'
+
+  const [customSkill, setCustomSkill] = useState('');
+
+  const toggleSkill = (skill) => {
+    setSelectedSkills(prev => prev.includes(skill) ? prev.filter(s => s !== skill) : [...prev, skill]);
+  };
+
+  const handleAddCustomSkill = (e) => {
+    e?.preventDefault();
+    const skill = customSkill.trim();
+    if (skill && !selectedSkills.includes(skill)) {
+      setSelectedSkills(prev => [...prev, skill]);
+      setCustomSkill('');
+    }
+  };
+
   const [authMode, setAuthMode] = useState('login'); // 'login', 'register'
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  
-  const containerRef = useRef(null);
-  const formRef = useRef(null);
-  const selectionRef = useRef(null);
-
-  // GSAP Transitions
-  useEffect(() => {
-    if (userType) {
-      // Transition from selection to form
-      gsap.to(selectionRef.current, { 
-        x: -50, 
-        opacity: 0, 
-        display: 'none', 
-        duration: 0.4, 
-        ease: 'power2.in' 
-      });
-      gsap.fromTo(formRef.current, 
-        { x: 50, opacity: 0, display: 'none' },
-        { x: 0, opacity: 1, display: 'flex', duration: 0.5, delay: 0.3, ease: 'power2.out' }
-      );
-    } else {
-      // Transition back to selection
-      gsap.to(formRef.current, { 
-        x: 50, 
-        opacity: 0, 
-        display: 'none', 
-        duration: 0.4, 
-        ease: 'power2.in' 
-      });
-      gsap.fromTo(selectionRef.current, 
-        { x: -50, opacity: 0, display: 'none' },
-        { x: 0, opacity: 1, display: 'flex', duration: 0.5, delay: 0.3, ease: 'power2.out' }
-      );
-    }
-  }, [userType]);
-
   const handleBack = () => {
     setUserType(null);
     setAuthMode('login');
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
+    setError('');
+
+    try {
+      if (authMode === 'register' && userType === 'volunteer' && selectedSkills.length === 0) {
+        throw new Error('Please select at least one skill.');
+      }
+
+      if (authMode === 'login') {
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+
+        // Cross-Role verification: ensure they logged in from the correct portal
+        const uid = userCredential.user.uid;
+        const docRef = doc(db, 'users', uid);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          const role = docSnap.data().role;
+          if (role !== userType) {
+            await signOut(auth); // Immediately sign them out
+            throw new Error(`Invalid login. You are registered as a ${role.toUpperCase()}. Please switch portals.`);
+          }
+        }
+      } else {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const uid = userCredential.user.uid;
+
+        // Save extra data to Firestore
+        if (userType === 'volunteer') {
+          await setDoc(doc(db, 'users', uid), {
+            role: 'volunteer',
+            fullName,
+            location,
+            skills: selectedSkills,
+            email,
+            createdAt: new Date().toISOString()
+          });
+        } else if (userType === 'ngo') {
+          await setDoc(doc(db, 'users', uid), {
+            role: 'ngo',
+            adminFullName,
+            city,
+            email,
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+
+      if (userType === 'ngo') navigate('/dashboard');
+      else navigate('/volunteer');
+
+
+    } catch (err) {
+      const code = err.code || '';
+      const friendlyErrors = {
+        'auth/email-already-in-use':    'This email is already registered. Try logging in instead.',
+        'auth/invalid-email':           'Please enter a valid email address.',
+        'auth/weak-password':           'Password must be at least 6 characters.',
+        'auth/wrong-password':          'Incorrect password. Please try again.',
+        'auth/user-not-found':          'No account found with this email.',
+        'auth/too-many-requests':       'Too many attempts. Please wait a moment and try again.',
+        'auth/network-request-failed':  'Network error. Check your connection and try again.',
+      };
+      setError(friendlyErrors[code] || err.message);
+    } finally {
       setLoading(false);
-      navigate('/dashboard');
-    }, 1500); 
+    }
   };
+
+  const containerRef = useRef(null);
+  const formRef = useRef(null);
+  const selectionRef = useRef(null);
+  //  Transitions
+  useEffect(() => {
+    if (userType) {
+      // Instantly hide selection, fade in form
+      gsap.set(selectionRef.current, { display: 'none' });
+      gsap.fromTo(formRef.current,
+        { x: 20, opacity: 0, display: 'flex' },
+        { x: 0, opacity: 1, duration: 0.4, ease: 'power2.out' }
+      );
+    } else {
+      // Instantly hide form, fade in selection
+      gsap.set(formRef.current, { display: 'none' });
+      gsap.fromTo(selectionRef.current,
+        { x: -20, opacity: 0, display: 'flex' },
+        { x: 0, opacity: 1, duration: 0.4, ease: 'power2.out' }
+      );
+    }
+  }, [userType]);
 
   return (
     <div className="min-h-screen flex items-center justify-center font-['Space_Grotesk'] bg-slate-50" ref={containerRef}>
-      {/* Main Master Auth Card */}
-      <div className="w-full max-w-6xl bg-white rounded-3xl md:rounded-[3rem] shadow-2xl shadow-emerald-900/5 overflow-hidden border border-emerald-100/50 min-h-0 md:min-h-[800px] grid grid-cols-1 lg:grid-cols-12">
-        
-        {/* Left Side: Dynamic Illustration/Brand Panel */}
+      {/* Main Auth Card */}
+      <div className="w-full max-w-6xl bg-white rounded-3xl md:rounded-[3rem] shadow-2xl shadow-emerald-900/5 overflow-hidden border border-emerald-100/50 min-h-0 md:h-[800px] grid grid-cols-1 lg:grid-cols-12 transform scale-95 lg:scale-[0.90]">
+
+        {/* Left Side */}
         <div style={{
           backgroundImage: "url('/images/small-robot.avif')",
           backgroundSize: "cover",
           backgroundPosition: "center",
           backgroundRepeat: "no-repeat",
         }}
-         className="lg:col-span-5 bg-black p-8 md:p-12 flex flex-col justify-between relative overflow-hidden">
+
+
+          className="lg:col-span-5 bg-black p-8 md:p-12 flex flex-col justify-between relative overflow-hidden">
           {/* Abstract Line Art Background */}
           <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
             <svg viewBox="0 0 400 400" className="w-full h-full">
@@ -99,14 +184,14 @@ const AuthPage = () => {
 
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-8 md:mb-12">
-              <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-600/20">
-                <Heart className="text-white w-6 h-6" fill="white" />
-              </div>
-              <span className="text-2xl font-bold tracking-tight text-slate-900">Impact AI</span>
+              <Link to={landingPage.nav.logo.link} className="flex items-center gap-2 text-emerald-600 hover:opacity-90 transition-opacity">
+                <img src={landingPage.nav.logo.url} className="w-7 h-7 md:w-8 md:h-8" />
+                <span className="font-serif text-xl md:text-2xl font-bold text-slate-900 tracking-tight">{landingPage.nav.logo.name}</span>
+              </Link>
             </div>
 
             <h1 className="text-3xl md:text-5xl font-bold leading-tight mb-4 md:mb-6 text-slate-900">
-              Empowering <br /> 
+              Empowering <br />
               <span className="text-emerald-600">Local Impact</span>
             </h1>
             <p className="text-base md:text-lg text-slate-600 max-w-md leading-relaxed">
@@ -116,7 +201,7 @@ const AuthPage = () => {
 
           <div className="relative z-10 bg-white/40 backdrop-blur-md p-6 rounded-2xl md:rounded-3xl border border-white/60 mt-8 md:mt-0">
             <div className="flex -space-x-3 mb-4">
-              {[1, 2, 3, 4].map(i => (
+              {AVATAR_LIST.map(i => (
                 <div key={i} className="w-10 h-10 rounded-full border-2 border-white bg-slate-200 overflow-hidden">
                   <img src={`https://i.pravatar.cc/150?u=${i + 20}`} alt="user" />
                 </div>
@@ -125,16 +210,16 @@ const AuthPage = () => {
                 +2k
               </div>
             </div>
-            <p className="text-sm font-medium text-slate-700">Joined by 2,000+ local organizations and volunteers this month.</p>
+            <p className="text-sm font-medium text-slate-700">Build the future with our local tech community.</p>
           </div>
         </div>
 
-        {/* Right Side: Flow Content */}
-        <div className="lg:col-span-7 bg-white p-6 md:p-12 lg:p-16 flex flex-col">
-          
+        {/* Right Side*/}
+        <div className="lg:col-span-7 bg-white p-6 md:p-12 lg:p-16 flex flex-col h-full max-h-full overflow-hidden">
+
           {/* Back Button */}
           {userType ? (
-            <button 
+            <button
               onClick={handleBack}
               className="group flex items-center gap-2 text-slate-500 hover:text-emerald-600 transition-colors mb-6 md:mb-8 w-fit"
             >
@@ -144,7 +229,7 @@ const AuthPage = () => {
               <span className="font-medium">Go back</span>
             </button>
           ) : (
-            <button 
+            <button
               onClick={() => navigate('/')}
               className="group flex items-center gap-2 text-slate-500 hover:text-emerald-600 transition-colors mb-6 md:mb-8 w-fit"
             >
@@ -156,8 +241,8 @@ const AuthPage = () => {
           )}
 
           {/* Flow Area */}
-          <div className="flex-1 flex flex-col">
-            
+          <div className="flex-1 flex flex-col min-h-0">
+
             {/* INITIAL ENTRY: Selection Screen */}
             <div ref={selectionRef} className="flex flex-col h-full">
               <div className="mb-8 md:mb-12">
@@ -167,7 +252,7 @@ const AuthPage = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 flex-1">
                 {/* NGO Card */}
-                <button 
+                <button
                   onClick={() => setUserType('ngo')}
                   className="group relative flex flex-col p-6 md:p-8 bg-white border-2 border-slate-100 rounded-3xl md:rounded-[2.5rem] text-left transition-all hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-500/10"
                 >
@@ -183,7 +268,7 @@ const AuthPage = () => {
                 </button>
 
                 {/* Volunteer Card */}
-                <button 
+                <button
                   onClick={() => setUserType('volunteer')}
                   className="group relative flex flex-col p-6 md:p-8 bg-white border-2 border-slate-100 rounded-3xl md:rounded-[2.5rem] text-left transition-all hover:border-emerald-500 hover:shadow-xl hover:shadow-emerald-500/10"
                 >
@@ -200,7 +285,7 @@ const AuthPage = () => {
               </div>
 
               <div className="mt-8 md:mt-12 text-center text-slate-500 text-sm md:text-base">
-                Already have an account? <button 
+                Already have an account? <button
                   onClick={() => {
                     setUserType('volunteer');
                     setAuthMode('login');
@@ -213,7 +298,7 @@ const AuthPage = () => {
             </div>
 
             {/* FORM AREA: NGO or Volunteer */}
-            <div ref={formRef} className="hidden flex-col h-full">
+            <div ref={formRef} className="hidden flex-col h-full min-h-0">
               <div className="mb-8 md:mb-10">
                 <div className="flex items-center gap-3 mb-3 md:mb-4">
                   <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
@@ -224,7 +309,7 @@ const AuthPage = () => {
                   </h2>
                 </div>
                 <p className="text-slate-500 text-sm md:text-base">
-                  {authMode === 'login' 
+                  {authMode === 'login'
                     ? `Sign in to your ${userType === 'ngo' ? 'NGO' : 'Volunteer'} workspace.`
                     : `Complete the details below to register as a ${userType === 'ngo' ? 'NGO Admin' : 'Volunteer'}.`
                   }
@@ -233,13 +318,13 @@ const AuthPage = () => {
 
               {/* Form Toggle */}
               <div className="flex p-1 bg-slate-100 rounded-2xl mb-6 md:mb-8 w-fit">
-                <button 
+                <button
                   onClick={() => setAuthMode('login')}
                   className={`px-6 md:px-8 py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all ${authMode === 'login' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                   Login
                 </button>
-                <button 
+                <button
                   onClick={() => setAuthMode('register')}
                   className={`px-6 md:px-8 py-2 md:py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all ${authMode === 'register' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
@@ -247,11 +332,11 @@ const AuthPage = () => {
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4 md:space-y-6 overflow-y-auto pr-2 max-h-[500px] custom-scrollbar flex-1">
+              <form onSubmit={handleSubmit} className="space-y-4 md:space-y-6 overflow-y-auto pr-2 custom-scrollbar flex-1 min-h-0">
                 {/* Common Fields: Login */}
                 <div className="space-y-4">
-                  <InputField icon={<Mail />} label="Email Address" type="email" placeholder="email@example.com" required />
-                  <InputField icon={<Lock />} label="Password" type="password" placeholder="••••••••" required />
+                  <InputField icon={<Mail />} label="Email Address" type="email" placeholder="email@example.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
+                  <InputField icon={<Lock />} label="Password" type="password" placeholder="••••••••" required value={password} onChange={(e) => setPassword(e.target.value)} />
                 </div>
 
                 {authMode === 'register' && (
@@ -259,101 +344,87 @@ const AuthPage = () => {
                     {userType === 'ngo' ? (
                       /* NGO REGISTRATION FIELDS */
                       <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <InputField label="Organization Name" placeholder="Eco-Impact Foundation" required />
-                          <InputField label="Admin Full Name" placeholder="Sarah Jenkins" required />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <InputField icon={<Phone />} label="Admin Phone" placeholder="+1 (555) 000-0000" required />
-                          <InputField icon={<ShieldCheck />} label="NGO Registration Number" placeholder="NGO-12345-67" required />
-                        </div>
-                        <InputField icon={<Globe />} label="Organization Website (Optional)" placeholder="https://www.example.org" />
-                        
-                        <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                            <Layers className="w-4 h-4 text-emerald-600" />
-                            Area of Operation
-                          </label>
-                          <select className="w-full px-5 py-3.5 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-emerald-500 focus:bg-white focus:ring-0 transition-all outline-none text-sm md:text-base">
-                            <option>Local (Community/City)</option>
-                            <option>National (Country-wide)</option>
-                            <option>International</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
-                            <Upload className="w-4 h-4 text-emerald-600" />
-                            Verification Document
-                          </label>
-                          <div className="border-2 border-dashed border-slate-200 rounded-2xl p-6 md:p-8 text-center hover:border-emerald-300 transition-colors group cursor-pointer bg-slate-50/50">
-                            <div className="p-3 bg-white rounded-full w-fit mx-auto mb-3 shadow-sm group-hover:scale-110 transition-transform">
-                              <Upload className="w-6 h-6 text-emerald-500" />
-                            </div>
-                            <p className="text-sm font-medium text-slate-600 mb-1">Click or drag proof of non-profit status</p>
-                            <p className="text-xs text-slate-400">PDF, JPG, PNG up to 10MB</p>
-                          </div>
-                        </div>
-
-                        <TextareaField label="Mission Statement" placeholder="Tell us about your organization's goals and impact..." rows={4} />
+                        <InputField label="Admin Full Name" placeholder="Sarah Jenkins" required value={adminFullName} onChange={(e) => setAdminFullName(e.target.value)} />
+                        <InputField icon={<MapPin />} label="City (Optional)" placeholder="San Francisco, CA" value={city} onChange={(e) => setCity(e.target.value)} />
                       </>
                     ) : (
                       /* VOLUNTEER REGISTRATION FIELDS */
                       <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <InputField label="Full Name" placeholder="Alex Rivera" required />
-                          <InputField icon={<Phone />} label="Phone Number" placeholder="+1 (555) 000-0000" required />
-                        </div>
-                        <InputField icon={<MapPin />} label="Location (City/State)" placeholder="San Francisco, CA" required />
+                        <InputField label="Full Name" placeholder="Alex Rivera" required value={fullName} onChange={(e) => setFullName(e.target.value)} />
 
-                        {/* Skills Checklist */}
+                        {/* Skills Builder */}
                         <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-4">Skills Assessment</label>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {['Logistics', 'Education', 'Food Handling', 'Tech Support', 'Marketing', 'Event Planning'].map(skill => (
-                              <label key={skill} className="flex items-center gap-3 p-3 border border-slate-100 rounded-xl cursor-pointer hover:bg-emerald-50/50 transition-colors">
-                                <input type="checkbox" className="w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-                                <span className="text-sm font-medium text-slate-600">{skill}</span>
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Availability Visual Selector */}
-                        <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-4 flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-emerald-600" />
-                            General Availability
+                          <label className="block text-sm font-bold text-slate-700 mb-2">
+                            Skills & Expertise <span className="text-red-500">*</span>
                           </label>
+                          <p className="text-xs text-slate-500 mb-4">Type a skill and press Add (e.g. "React", "First Aid")</p>
+                          
+                          <div className="flex gap-2 mb-4">
+                            <input
+                              type="text"
+                              value={customSkill}
+                              onChange={(e) => setCustomSkill(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddCustomSkill(e);
+                                }
+                              }}
+                              placeholder="Add your skills..."
+                              className="flex-1 px-5 py-3.5 md:py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:bg-white focus:border-emerald-500 outline-none text-slate-900 placeholder:text-slate-300 font-medium text-sm md:text-base"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAddCustomSkill}
+                              className="px-6 py-3 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 font-bold rounded-2xl transition-colors text-sm"
+                            >
+                              Add
+                            </button>
+                          </div>
+
+                          {/* Common Suggestions */}
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {['Medical', 'Teaching', 'Driving', 'IT Support', 'AI', 'Fundraising', 'Logistics', 'Food Handling', 'Event Planning', 'Disaster Relief', 'Animal Care'].map(skill => (
+                              !selectedSkills.includes(skill) && (
+                                <button
+                                  key={skill}
+                                  type="button"
+                                  onClick={() => toggleSkill(skill)}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 border border-slate-200"
+                                >
+                                  + {skill}
+                                </button>
+                              )
+                            ))}
+                          </div>
+
                           <div className="flex flex-wrap gap-2">
-                            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day, idx) => (
-                              <button key={idx} type="button" className="w-10 h-10 md:w-12 md:h-12 flex items-center justify-center border border-slate-100 rounded-xl font-bold text-slate-400 hover:border-emerald-500 hover:text-emerald-600 transition-all">
-                                {day}
+                            {selectedSkills.map(skill => (
+                              <button
+                                key={skill}
+                                type="button"
+                                onClick={() => toggleSkill(skill)}
+                                className="px-4 py-2 bg-emerald-600 border-emerald-600 text-white rounded-full text-sm font-medium shadow-md flex items-center gap-2 hover:bg-red-500 hover:border-red-500 transition-colors group"
+                                title="Click to remove"
+                              >
+                                {skill} <span className="text-emerald-200 group-hover:text-white">×</span>
                               </button>
                             ))}
+                            {selectedSkills.length === 0 && (
+                              <span className="text-sm text-slate-400 italic">No skills added yet...</span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Areas of Interest */}
-                        <div>
-                          <label className="block text-sm font-bold text-slate-700 mb-4">Areas of Interest</label>
-                          <div className="flex flex-wrap gap-2">
-                            {['Environment', 'Elder Care', 'Youth', 'Hunger', 'Animal Welfare'].map(interest => (
-                              <button key={interest} type="button" className="px-4 py-2 border border-slate-100 rounded-full text-sm font-medium text-slate-600 hover:bg-emerald-50 hover:border-emerald-200 transition-all">
-                                {interest}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <TextareaField label="Motivation" placeholder="Why do you want to volunteer with us?" rows={4} />
+                        <InputField icon={<MapPin />} label="Location (City/State) (Optional)" placeholder="Kolkata ,WB" value={location} onChange={(e) => setLocation(e.target.value)} />
                       </>
                     )}
                   </div>
                 )}
 
-                <button 
-                  type="submit" 
+                {error && <div className="text-red-500 text-sm font-bold text-center bg-red-50 p-3 rounded-xl border border-red-100">{error}</div>}
+                <button
+                  type="submit"
                   disabled={loading}
                   className="w-full py-3.5 md:py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold text-base md:text-lg shadow-lg shadow-emerald-900/10 transition-all flex items-center justify-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed mt-6 md:mt-8"
                 >
@@ -368,25 +439,30 @@ const AuthPage = () => {
                 </button>
               </form>
 
+              {/* Forget Pass */}
               {authMode === 'login' && (
-                <div className="mt-6 md:mt-8 text-center">
+                <div className="mt-6 md:mt-8 text-center" title='coming soon'>
                   <button className="text-sm font-bold text-slate-400 hover:text-emerald-700 transition-colors">
                     Forgot your password?
                   </button>
                 </div>
               )}
+
             </div>
           </div>
 
           {/* Footer Branding */}
-          <div className="mt-8 md:mt-auto pt-6 md:pt-8 border-t border-slate-100 flex items-center justify-between text-[10px] md:text-xs text-slate-400 font-medium uppercase tracking-widest">
+          {/* <div className="mt-8 md:mt-auto pt-6 md:pt-8 border-t border-slate-100 flex items-center justify-between text-[10px] md:text-xs text-slate-400 font-medium uppercase tracking-widest">
             <span>© 2026 AltruFlow Inc.</span>
             <span>Security Verified • 256-bit SSL</span>
-          </div>
+          </div> */}
+
         </div>
       </div>
 
-      <style dangerouslySetInnerHTML={{ __html: `
+      {/* SCrollbar*/}
+      <style dangerouslySetInnerHTML={{
+        __html: `
         .custom-scrollbar::-webkit-scrollbar {
           width: 6px;
         }
@@ -406,7 +482,7 @@ const AuthPage = () => {
 };
 
 // Helper Components
-const InputField = ({ icon, label, type = "text", placeholder, required = false }) => (
+const InputField = ({ icon, label, type = "text", placeholder, required = false, value, onChange }) => (
   <div className="space-y-2">
     <label className="block text-sm font-bold text-slate-700">
       {label} {required && <span className="text-red-500">*</span>}
@@ -417,25 +493,29 @@ const InputField = ({ icon, label, type = "text", placeholder, required = false 
           {React.cloneElement(icon, { size: 18 })}
         </div>
       )}
-      <input 
-        type={type} 
+      <input
+        type={type}
         placeholder={placeholder}
         required={required}
+        value={value}
+        onChange={onChange}
         className={`w-full ${icon ? 'pl-14' : 'px-5'} py-3.5 md:py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:bg-white focus:border-emerald-500 focus:ring-0 transition-all outline-none text-slate-900 placeholder:text-slate-300 font-medium text-sm md:text-base`}
       />
     </div>
   </div>
 );
 
-const TextareaField = ({ label, placeholder, rows = 3, required = false }) => (
+const TextareaField = ({ label, placeholder, rows = 3, required = false, value, onChange }) => (
   <div className="space-y-2">
     <label className="block text-sm font-bold text-slate-700">
       {label} {required && <span className="text-red-500">*</span>}
     </label>
-    <textarea 
+    <textarea
       placeholder={placeholder}
       rows={rows}
       required={required}
+      value={value}
+      onChange={onChange}
       className="w-full px-5 py-3.5 md:py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:bg-white focus:border-emerald-500 focus:ring-0 transition-all outline-none text-slate-900 placeholder:text-slate-300 font-medium resize-none text-sm md:text-base"
     />
   </div>
